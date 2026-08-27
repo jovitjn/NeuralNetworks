@@ -1,79 +1,130 @@
 # Neural Networks from First Principles
 
-A collection of compact PyTorch/Jupyter implementations built to understand how common neural-network architectures work internally rather than relying only on high-level training abstractions.
+Educational PyTorch implementations tracing a progression from feed-forward and convolutional networks to GAN, DCGAN, WGAN, and WGAN-GP objectives.
 
-The repository covers the progression from basic feed-forward networks to convolutional models and several generations of GAN objectives.
+These are learning implementations and coursework experiments, not novel architectures or research results. The aim is to make the model components, objectives, and optimization mechanics explicit before using them in larger computer-vision and generative-model projects.
 
-## Included implementations
+## Contents
 
-| Component | What it demonstrates |
-| --- | --- |
-| `basicNN.ipynb` | Core feed-forward neural-network workflow and training loop. |
-| `CNN.ipynb` | Convolutional layers, feature extraction, pooling and image classification. |
-| `basicGAN/` | Basic adversarial training with separate generator and discriminator networks. |
-| `DC_GAN.ipynb` | Convolutional GAN architecture for image generation. |
-| `WGAN.ipynb` | Wasserstein GAN training objective and critic-based optimization. |
-| `WGAN_gradientpenalty.py` | WGAN-GP with an explicit gradient-penalty implementation. |
+| Component | What it demonstrates | Format |
+|---|---|---|
+| `basicNN.ipynb` | Feed-forward model and training loop | Original notebook |
+| `CNN.ipynb` | Convolution, pooling, and image classification | Original notebook |
+| `basicGAN/` | Basic generator/discriminator training | Notebook + script |
+| `DC_GAN.ipynb` | Convolutional image generation | Original notebook |
+| `WGAN.ipynb` | Wasserstein critic objective | Original notebook |
+| `wgan_gp.py` | Reusable 64×64 generator, critic, initialization, and penalty | Python module |
+| `WGAN_gradientpenalty.py` | Configurable WGAN-GP training, logging, sampling, and checkpoints | CLI script |
 
-## WGAN-GP implementation
+The historical notebooks are retained as the original experiments. The WGAN-GP implementation is the polished, reusable surface of this repository.
 
-The standalone `WGAN_gradientpenalty.py` contains a complete training example with:
+## WGAN-GP
 
-- convolutional generator and critic
-- DCGAN-style weight initialization
-- Wasserstein critic objective
-- multiple critic updates per generator step
-- gradient penalty
-- MNIST data loading
-- TensorBoard logging
-
-The gradient penalty is computed on interpolated real/fake samples:
+The critic is trained to minimize
 
 \[
-\lambda\,\mathbb{E}_{\hat{x}}\left(\|\nabla_{\hat{x}}D(\hat{x})\|_2-1\right)^2,
+\mathcal{L}_D = \mathbb{E}_{\tilde{x}\sim P_g}[D(\tilde{x})]
+- \mathbb{E}_{x\sim P_r}[D(x)]
++ \lambda\,\mathbb{E}_{\hat{x}}
+\left(\lVert\nabla_{\hat{x}}D(\hat{x})\rVert_2-1\right)^2,
 \]
 
-which encourages the critic to satisfy the Lipschitz constraint without weight clipping.
+while the generator minimizes
 
-## Why this repository exists
+\[
+\mathcal{L}_G=-\mathbb{E}_{\tilde{x}\sim P_g}[D(\tilde{x})].
+\]
 
-This is deliberately an **educational implementation repository**, not a claim of a novel architecture. I use it to work through the mechanics behind models that later appear as building blocks in computer-vision and generative-model research.
+`wgan_gp.py` provides:
 
-That means the emphasis is on readable implementations of:
+- a DCGAN-style generator that maps latent vectors to 64×64 images
+- an unconstrained convolutional `Critic` rather than a sigmoid discriminator
+- DCGAN-style weight initialization
+- gradient penalty on random real/fake interpolations
 
-- forward passes
-- loss functions
-- training dynamics
-- initialization
-- optimization
-- architectural differences between GAN variants
+The training script adds:
 
-## Running the WGAN-GP example
+- `argparse` configuration for the dataset and hyperparameters
+- deterministic seed handling
+- MNIST or `ImageFolder` input
+- five critic steps per generator step by default
+- detached generator outputs during critic optimization
+- no unnecessary retained autograd graph
+- TensorBoard losses and generated samples
+- PNG sample grids
+- resumable model/optimizer checkpoints
+- automatic CPU, CUDA, or Apple MPS selection
+- a `--max-batches` smoke-test option
 
-Create an environment with PyTorch and the required utilities:
+## Setup
+
+Python 3.10 or newer is recommended.
 
 ```bash
-pip install torch torchvision tensorboard tqdm
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+## Train on MNIST
+
+```bash
+python WGAN_gradientpenalty.py \
+  --dataset mnist \
+  --data-dir data \
+  --epochs 100 \
+  --batch-size 64 \
+  --critic-steps 5 \
+  --gradient-penalty-weight 10 \
+  --seed 42
+```
+
+The script resizes MNIST to 64×64, normalizes images to \([-1,1]\), downloads the dataset into `data/`, writes events and sample PNGs under `logs/wgan_gp/`, and stores checkpoints under `checkpoints/`.
+
+For a quick pipeline check:
+
+```bash
+python WGAN_gradientpenalty.py --epochs 1 --max-batches 2 --workers 0
+```
+
+## Train on an image folder
+
+Use the directory layout expected by `torchvision.datasets.ImageFolder`:
+
+```text
+data/celeba/
+└── images/
+    ├── image_0001.jpg
+    └── image_0002.jpg
 ```
 
 Then run:
 
 ```bash
-python WGAN_gradientpenalty.py
+python WGAN_gradientpenalty.py \
+  --dataset image-folder \
+  --data-dir data/celeba \
+  --image-channels 3
 ```
 
-The script automatically downloads MNIST and writes real/fake image grids to TensorBoard logs.
-
-To inspect them:
+## Resume a trusted checkpoint
 
 ```bash
-tensorboard --logdir logs
+python WGAN_gradientpenalty.py \
+  --epochs 100 \
+  --resume checkpoints/wgan_gp_epoch_020.pt
 ```
 
-## Notes
+Checkpoints include both networks, both optimizers, the completed epoch, the global step, and the run configuration. Resume only checkpoints you created or otherwise trust.
 
-Some notebooks contain saved outputs from the original experiments and are therefore larger than ideal. The code is being retained because it documents my progression through the underlying architectures; future cleanup can convert the strongest notebooks into smaller scripts/modules and strip embedded notebook outputs.
+## Reproducibility and limitations
 
-## References
+- Seeds and deterministic cuDNN settings reduce nondeterminism, but exact results can still differ across devices and library versions.
+- The convolutional architecture is specifically designed for 64×64 images.
+- No quantitative generative metric such as FID is reported in this repository; do not infer image quality from the presence of a complete training pipeline.
+- The default feature width is deliberately small for educational runs rather than tuned for best generation quality.
+- Saved notebook outputs make some historical files large. They remain to preserve the original learning record and are not presented as the primary code path.
 
-The implementations are learning exercises based on the original ideas behind CNNs, GANs, DCGAN, WGAN and WGAN-GP. Where an implementation closely follows a paper/tutorial convention, it should be read as an educational reproduction rather than original research.
+## Provenance
+
+The implementations reproduce standard concepts from GAN, DCGAN, WGAN, and WGAN-GP literature and common instructional conventions. Architectural ideas and objectives belong to their original authors; this repository documents my implementation and learning process.
